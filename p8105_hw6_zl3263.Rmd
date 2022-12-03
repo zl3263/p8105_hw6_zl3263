@@ -1,0 +1,105 @@
+---
+title: "p8105_hw6_zl3263"
+output: github_document
+date: "2022-12-03"
+---
+
+### Problem 2
+
+```{r}
+library(tidyverse)
+```
+
+**load data**
+```{r}
+homicides = read_csv("https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv")%>%
+   janitor::clean_names() %>%
+   mutate(
+    city_state = paste(city,",",state)
+  ) %>%
+  filter(
+    victim_race != "Unknown",
+    city_state != "Tulsa , AL",
+    victim_age != "Unknown",
+    victim_sex != "Unknown"
+    
+  ) %>%
+  mutate(
+    victim_age = as.numeric(victim_age)
+  ) 
+  
+  
+```
+**modeling on baltimore**
+```{r}
+baltimore = homicides %>%
+  filter(
+    victim_race == "Black" | victim_race == "White",
+    city_state == 'Baltimore , MD',
+  ) %>%
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest")
+  )
+
+model_logistic = glm(resolved ~ victim_age + victim_sex + victim_race, data = baltimore, family = binomial() )
+
+model_logistic %>% 
+  broom::tidy() %>% 
+  mutate(
+    OR = exp(estimate),
+    CI_lower = exp(estimate - 1.96 * std.error),
+    CI_upper = exp(estimate + 1.96 * std.error)
+  ) %>%
+  select(term, estimate, CI_lower, CI_upper, OR)
+
+```
+
+**modeling on each city**
+```{r}
+fit_others = homicides %>%
+  filter(
+    victim_race == "Black" | victim_race == "White",
+  ) %>%
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest")
+  ) %>%
+  nest(nested = -city_state) %>% 
+  mutate(
+    models = map(.x = nested, ~glm(resolved ~ victim_age + victim_sex + victim_race, data = .x, family = binomial())),
+    outputs = map(models, broom::tidy)
+    ) %>%
+  select(city_state, outputs) %>% 
+  unnest(outputs) %>% 
+  mutate(
+    OR = exp(estimate),
+    CI_lower = exp(estimate - 1.96 * std.error),
+    CI_upper = exp(estimate + 1.96 * std.error)
+  ) %>% 
+  select(city_state, term, estimate, CI_lower, CI_upper, OR) %>%
+  filter(
+    term == "victim_sexMale"
+  )
+
+fit_others %>%
+  head() %>%
+  knitr::kable(digits = 3)
+```
+
+**plot**
+```{r}
+fit_others %>%
+  ggplot(aes(x = reorder(city_state, OR), y = OR)) +
+	  geom_point() +
+	  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper)) +
+	  labs(
+	  	x = "Cities",
+	  	y = "ORs with Confidence Intervals",
+	  ) +
+	  theme(
+	  	axis.text.x = element_text(angle = 90)
+	  )
+```
+
+**comments**
+
+In most of the cities, homicides in which the victim is male are less likely to be resolved than those in which the victim is female. But for cities after Atlanta shown on the plot above, homicides with female victim are less likely to be resolved.
